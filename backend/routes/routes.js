@@ -1,15 +1,184 @@
-const express = require('express');
+const _config = require('../config');
 
+const express = require('express');
 var router = express.Router();
+const redis = require('redis');
+const fs = require('fs');
+const path = require('path');
+const AWS = require('aws-sdk');
+const localImageDir = 'public/images/uploads/';
+
+//Using Multer middle-ware to upload image files from the form
+const multer = require('multer');
+const storage = multer.diskStorage({
+    //destination is used to determine within which folder the uploaded files should be stored
+    destination: (req, file, cb) => {
+        cb(null, localImageDir)
+    },
+    //filename is used to determine what the file should be named inside the folder
+    filename: (req, file, cb) => {
+        let tempName = file.originalname;
+        tempName = tempName.replace(/\s+/g, '-').toLowerCase();
+        //checking if the file with the same name already exists or not
+        fs.access(localImageDir + tempName, fs.constants.F_OK, function(error) {
+            if (error) {
+                if (error.code === 'ENOENT') { //file does not exist
+                    let finalFileName = tempName;
+                    cb(null, finalFileName);
+                } else {
+                    console.error("Error checking existence of file in default directory:", error);
+                }
+            } else { //file exists, rename file
+                let tempFileName = path.basename(localImageDir + tempName, path.extname(tempName)); //Stripping the file's extension
+                let finalFileName = tempFileName.concat("-" + Date.now() + path.extname(tempName));
+                cb(null, finalFileName);
+            }
+        })
+    }
+});
+const upload = multer({
+    storage: storage
+});
+
+
+/**
+ * Redis setup
+ */
+const redisClient = redis.createClient(); //default port : 6379
+//redis connection
+redisClient.on('connect', () => {
+    console.log('Redis client connected');
+    redisClient.get('lastImage', (error, imageName) => {
+        if (error)
+            throw error;
+
+        if (imageName != null)
+            lastImage = imageName; // last uploaded image
+    });
+    redisClient.get('lastVerifiedImage', (error, imageName) => {
+        if (error)
+            throw error;
+
+        if (imageName != null)
+            lastVerifiedImage = imageName; // last verified image
+    });
+});
+redisClient.on('error', error => console.log('Redis client error: ' + error));
+
+
+/**
+ * Upload file to AWS S3
+ */
+function uploadToS3(req, res, next) {
+    let file = req.file;
+    fs.readFile(file.path, function(err, data) {
+        if (err) throw err; // Something went wrong!
+
+        let s3bucket = new AWS.S3({
+            accessKeyId: _config.aws.IAM_USER_KEY,
+            secretAccessKey: _config.aws.IAM_USER_SECRET,
+            Bucket: _config.aws.BUCKET_NAME,
+        });
+
+        s3bucket.createBucket(function() {
+            var params = {
+                Bucket: _config.aws.BUCKET_NAME,
+                Key: file.filename,
+                Body: data,
+                ContentType: file.mimetype,
+                ACL: "public-read"
+            };
+            s3bucket.upload(params, function(err, data) {
+                if (err) {
+                    throw err;
+                }
+                req.file.s3 = data.Location; //s3
+                next();
+            });
+        });
+    });
+}
 
 /* GET home page */
 router.get('/', function(req, res, next) {
-  res.json({title: 'Welcome to Upload Validate'});
+    res.json({
+        title: 'Welcome to Upload Validate'
+    });
 });
 
 /* GET image upload page */
 router.get('/upload', function(req, res, next) {
-  res.json({title: 'Upload Image & Category', categories: [1,2,3,4,5,6,7,8,9,10]});
+    res.json({
+        title: 'Upload Image & Category',
+        categories: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    });
+});
+
+/* POST upload image and save its category */
+router.post('/uploadImage', upload.single('file'), uploadToS3, function(req, res, next) {
+    redisClient.hset(`image:${req.file.filename}`, 'categoryID', `${req.body.category}`, redis.print);
+    if (req.file.s3) {
+        redisClient.hset(`image:${req.file.filename}`, 's3', `${req.file.s3}`, redis.print);
+    }
+    redisClient.sadd('uploaded', `image:${req.file.filename}`); //add the uploaded image in a list of images uploaded so far
+    redisClient.hmget(`image:${req.file.filename}`, 'previous', 'next', (error, reference) => {
+        if (error)
+            throw error;
+
+        let nodeType = 'new';
+        let lastImageCopy = lastImage;
+
+        if (reference[0] === null && reference[1] !== null)
+            nodeType = 'first';
+        else if (reference[0] !== null && reference[1] === null)
+            nodeType = 'last';
+        else if (reference[0] !== null && reference[1] !== null)
+            nodeType = 'middle';
+
+        switch (nodeType) {
+            case 'new':
+                //all good here
+                break;
+            case 'first':
+                //all good here
+                break;
+            case 'middle':
+                // previous[next -> ref(update)] <- [previous]current node
+                redisClient.hset(`image:${reference[0]}`, 'next', reference[1], redis.print);
+                // current node[next] -> next[previous -> ref(update)]
+                redisClient.hset(`image:${reference[1]}`, 'previous', reference[0], redis.print);
+                break;
+            case 'last':
+                // previous[next -> ref(update)] <- [previous]current node
+                redisClient.hdel(`image:${reference[0]}`, 'next', redis.print);
+                break;
+        }
+
+        if (lastImageCopy != null && lastImageCopy !== req.file.filename) {
+            //update previous node's previous ref
+            redisClient.hset(`image:${lastImageCopy}`, 'previous', `${req.file.filename}`, redis.print);
+            //update the current node
+            redisClient.hmset(`image:${req.file.filename}`, 'next', lastImageCopy, redis.print);
+            // remove previous ref
+            redisClient.hdel(`image:${req.file.filename}`, 'previous', redis.print);
+        }
+        if (lastVerifiedImage === null) {
+            lastVerifiedImage = req.file.filename; //update last verified image
+        } else if (lastVerifiedImage === req.file.filename && reference[0] !== null) {
+            lastVerifiedImage = reference[0]; //update last verified image
+        }
+        redisClient.set('lastVerifiedImage', lastVerifiedImage, redis.print); //persist
+
+        lastImage = req.file.filename; //update last uploaded image
+        redisClient.set('lastImage', lastImage, redis.print); //persist
+        res.json({
+            title: 'Upload Successfull',
+            categories: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            imageName: req.file.filename,
+            s3: req.file.s3,
+            category: req.body.category
+        });
+    });
 });
 
 module.exports = router;
