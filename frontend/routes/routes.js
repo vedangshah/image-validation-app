@@ -98,4 +98,33 @@ router.get('/upload', function(req, res, next) {
   });
 });
 
+/* POST upload image and save its category  */
+router.post('/uploadImage', upload.single("image"), function(req, res, next) {
+  if (req.file != null && req.body != null) {
+    var formData = {
+      file: fs.createReadStream(req.file.path), //req.file.path contains the web server's directory path where the file is uploaded temporarily
+      category: req.body.category
+    };
+    //Using Request - Simplified HTTP client package from npm for making HTTP/HTTPS requests
+    request.post({url: endpointURL.concat('/uploadImage'), formData: formData}, function(err, httpResponse, body) {
+      var finalResponseData = '';
+      if (err) {
+        fs.unlink(req.file.path, (err) => { //delete the uploaded file from web server
+          if(err)
+            throw err;
+        });
+        return console.error('Upload failed:', err);
+      }
+      else {
+        fs.unlink(req.file.path, (err) => { //delete the uploaded file from web server
+          if(err)
+            throw err;
+        });
+        finalResponseData = JSON.parse(body);
+        res.render('upload', finalResponseData);
+      }
+    });
+  }
+});
+
 module.exports = router;
