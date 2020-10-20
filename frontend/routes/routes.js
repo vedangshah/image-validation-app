@@ -127,4 +127,32 @@ router.post('/uploadImage', upload.single("image"), function(req, res, next) {
   }
 });
 
+/* GET list of uploaded images */
+router.get('/uploadedImages', function(req, res, next) {
+  var responseData = '';
+  //Using core http module to send request to and receive response from the API server/Business Layer
+  http.get(endpointURL.concat('/uploadedImages'), (response) => {
+    response.on('data', chunk => {
+      responseData += chunk;
+    });
+    response.on('end', () => {
+      try {
+        responseData = JSON.parse(responseData);
+        res.render('uploadedImages', responseData);
+      }
+      catch (error) {
+          console.error('Got error in parsing data:',error.message);
+          throw error;
+      }
+    });
+    response.on('error', (error) => {
+      console.log('Got error in response:',error.message);
+      throw error;
+    });
+  }).on('error', (error) => {
+      console.log('Got error in http/https.get():',error.message);
+      throw error;
+  });
+});
+
 module.exports = router;

@@ -181,4 +181,50 @@ router.post('/uploadImage', upload.single('file'), uploadToS3, function(req, res
     });
 });
 
+/* GET list of uploaded images */
+router.get('/uploadedImages', function(req, res, next) {
+    redisClient.smembers('uploaded', (error, data) => {
+      if(error) {
+        throw error;
+      }
+      if(data.length > 0) {
+      var imageKeys = data;
+      var images = [];
+      var imageCategories = [];
+      var imagePaths = [];
+      var serialNo = [];
+      for(i = 0; i < imageKeys.length; i++) {
+        if(imageKeys[i] != null) {
+          images.push((imageKeys[i].split(":"))[1]);
+          serialNo.push(i);
+        }
+        else {
+          images.push("-");
+          serialNo.push(i);
+        }
+      }
+      var i = 0, j = 0;
+      for(; i < data.length; i++) {
+        redisClient.hmget(`${data[i]}`, 'categoryID', 's3', (error, data) => {
+          if(data.length > 0) {
+            if(data[0] != null) {
+              imageCategories.push(data[0]);
+            }
+            if(data[1] != null) {
+              imagePaths.push(data[1]);
+            }
+          }
+          if(j === (images.length - 1)) {
+                res.json({title: 'List of Uploaded Images', listExists: "true", srNo: serialNo, imageNames: images, categories: imageCategories, paths: imagePaths});
+          }
+          j++;
+        });
+      }
+    }
+    else {
+        res.json({title: 'List of Uploaded Images'});
+    }
+    });
+  });
+
 module.exports = router;
