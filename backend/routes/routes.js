@@ -227,4 +227,21 @@ router.get('/uploadedImages', function(req, res, next) {
     });
   });
 
+/** GET image validation page */
+router.get('/validate', function(req, res, next) {
+    redisClient.hmget(`image:${lastVerifiedImage}`, 'categoryID', 's3', (error, data) => {
+        if(error)
+            throw error;
+
+        if(data[0] != null) {
+            res.json({title: 'Validate Image Category', categories: [1,2,3,4,5,6,7,8,9,10], imageName: lastVerifiedImage, s3: data[1], category: data[0]});
+        }
+        else {
+            // no more images to validate
+            res.json({ title: 'Validate Image Category'});
+        }
+    });
+});
+
+
 module.exports = router;
