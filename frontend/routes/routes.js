@@ -183,4 +183,49 @@ router.get('/validate', function(req, res, next) {
   });
 });
 
+/* POST validate existing image  */
+router.post('/validate', function(req, res, next) {
+  const options = {
+    hostname: 'localhost',
+    port: 3000,
+    path: '/validate',
+    method: 'POST',
+    json: true,
+    headers: {
+        'accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+  }
+  //Using core http module to send request to and receive response from the API server/Business Layer
+  const postRequest = http.request(options, (response) => {
+    response.on('data', chunk => {
+      //do nothing
+    });
+    response.on('end', () => {
+      try {
+        if(response.statusCode === 200) {
+          res.redirect('/validate');
+        }
+        else {
+          throw new error(res.body);
+        }
+      }
+      catch (error) {
+          console.error('Got error while receiving response:',error.message);
+          throw error;
+      }
+    });
+    response.on('error', (error) => {
+      console.log('Got error in response:',error.message);
+      throw error;
+    });
+  });
+  postRequest.on('error', (error) => {
+    console.error('Problem with the request:',error.message);
+    throw error;
+  });
+  postRequest.write(JSON.stringify(req.body)); //sending a POST request to API server with the req data received via form on web server
+  postRequest.end();
+});
+
 module.exports = router;

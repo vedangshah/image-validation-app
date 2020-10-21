@@ -243,5 +243,37 @@ router.get('/validate', function(req, res, next) {
     });
 });
 
-
+/** POST validate existing image */
+router.post('/validate', function(req, res, next) {
+    let imageName = req.body.image;
+    let rating = req.body.rating;
+  
+    if(imageName !== lastVerifiedImage)
+      throw new Error('Unrated Image mis-match, try again');
+  
+    // update image rating
+    redisClient.hset(`image:${imageName}`, 'rating', rating, redis.print);
+    redisClient.sadd('validated', `image:${imageName}`); //add the validated image in a list of images validated so far
+    // update last verified image
+    redisClient.hget(`image:${lastVerifiedImage}`, 'previous', (error, reference) => {
+      if(error)
+        throw error;
+  
+      if(reference !== null){
+        // has next validated image
+        console.log("inside if");
+        lastVerifiedImage = reference; //update last verified image
+        redisClient.set('lastVerifiedImage', lastVerifiedImage, redis.print); //persist
+        res.sendStatus(200);
+      }
+        else {
+        //no more images to validate
+        console.log("inside else");
+        redisClient.del('lastVerifiedImage', redis.print);
+        lastVerifiedImage = null;
+        res.sendStatus(200);
+      }
+    });
+  });
+  
 module.exports = router;
