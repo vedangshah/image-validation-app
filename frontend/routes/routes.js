@@ -228,4 +228,33 @@ router.post('/validate', function(req, res, next) {
   postRequest.end();
 });
 
+
+/* GET list of validated images */
+router.get('/validatedImages', function(req, res, next) {
+  var responseData = '';
+  //Using core http module to send request to and receive response from the API server/Business Layer
+  http.get(endpointURL.concat('/validatedImages'), (response) => {
+    response.on('data', chunk => {
+      responseData += chunk;
+    });
+    response.on('end', () => {
+      try {
+        responseData = JSON.parse(responseData);
+        res.render('validatedImages', responseData);
+      }
+      catch (error) {
+          console.error('Got error in parsing data:',error.message);
+          throw error;
+      }
+    });
+    response.on('error', (error) => {
+      console.log('Got error in response:',error.message);
+      throw error;
+    });
+  }).on('error', (error) => {
+      console.log('Got error in http/https.get():',error.message);
+      throw error;
+  });
+});
+
 module.exports = router;

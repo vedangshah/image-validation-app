@@ -249,31 +249,81 @@ router.post('/validate', function(req, res, next) {
     let rating = req.body.rating;
   
     if(imageName !== lastVerifiedImage)
-      throw new Error('Unrated Image mis-match, try again');
+        throw new Error('Unrated Image mis-match, try again');
   
     // update image rating
     redisClient.hset(`image:${imageName}`, 'rating', rating, redis.print);
     redisClient.sadd('validated', `image:${imageName}`); //add the validated image in a list of images validated so far
     // update last verified image
     redisClient.hget(`image:${lastVerifiedImage}`, 'previous', (error, reference) => {
-      if(error)
-        throw error;
+        if(error)
+            throw error;
   
-      if(reference !== null){
-        // has next validated image
-        console.log("inside if");
-        lastVerifiedImage = reference; //update last verified image
-        redisClient.set('lastVerifiedImage', lastVerifiedImage, redis.print); //persist
-        res.sendStatus(200);
-      }
+        if(reference !== null){
+            // has next validated image
+            console.log("inside if");
+            lastVerifiedImage = reference; //update last verified image
+            redisClient.set('lastVerifiedImage', lastVerifiedImage, redis.print); //persist
+            res.sendStatus(200);
+        }
         else {
-        //no more images to validate
-        console.log("inside else");
-        redisClient.del('lastVerifiedImage', redis.print);
-        lastVerifiedImage = null;
-        res.sendStatus(200);
-      }
+            //no more images to validate
+            console.log("inside else");
+            redisClient.del('lastVerifiedImage', redis.print);
+            lastVerifiedImage = null;
+            res.sendStatus(200);
+        }
     });
-  });
+});
+
+/* GET list of validated images */
+router.get('/validatedImages', function(req, res, next) {
+    redisClient.smembers('validated', (error, data) => {
+        if(error) {
+            throw error;
+        }
+        if(data.length > 0) {
+            var imageKeys = data;
+            var images = [];
+            var imageCategories = [];
+            var imagePaths = [];
+            var imageRatings = [];
+            var serialNo = [];
+            for(i = 0; i < imageKeys.length; i++) {
+                if(imageKeys[i] != null) {
+                    images.push((imageKeys[i].split(":"))[1]);
+                    serialNo.push(i);
+                }
+                else {
+                    images.push("-");
+                    serialNo.push(i);
+                }
+            }
+            var i = 0,  j = 0;
+            for(; i<data.length; i++) {
+                redisClient.hmget(`${data[i]}`, 'categoryID', 's3', 'rating', (error, data) => {
+                    if(data.length > 0) {
+                        if(data[0] != null) {
+                            imageCategories.push(data[0]);
+                        }
+                        if(data[1] != null) {
+                            imagePaths.push(data[1]);
+                        }
+                        if(data[2] != null) {
+                            imageRatings.push(data[2]);
+                        }
+                    }
+                    if(j === (images.length - 1)) {
+                        res.json({title: 'List of Validated Images', listExists: "true", srNo: serialNo, imageNames: images, categories: imageCategories, paths: imagePaths, ratings: imageRatings});
+                    }
+                    j++;
+                });
+            }
+        }
+        else {
+            res.json({title: 'List of Validated Images'});
+        }
+    });
+});
   
 module.exports = router;
